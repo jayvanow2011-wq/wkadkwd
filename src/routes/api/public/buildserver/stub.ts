@@ -1004,7 +1004,7 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 // avfoundation, Linux → v4l2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const cameraGo = ` + '`' + `package main
+const cameraGo = `package main
 
 import (
 	"bufio"
