@@ -269,6 +269,14 @@ func handleCommand(send chan<- []byte, p map[string]any) {
 		screenStop(send, c.ID)
 	case "screen.config":
 		screenConfig(send, c.ID, p)
+	case "camera.list":
+		go cameraList(send, c.ID)
+	case "camera.start":
+		cameraStart(send, c.ID, p)
+	case "camera.stop":
+		cameraStop(send, c.ID)
+	case "camera.config":
+		cameraConfig(send, c.ID, p)
 	case "input.mouse":
 		inputMouseCmd(send, c.ID, p)
 	case "input.key":
