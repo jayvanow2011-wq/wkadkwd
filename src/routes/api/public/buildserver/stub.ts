@@ -1073,9 +1073,27 @@ type bitmapInfo struct {
 }
 
 func captureFrame(maxW int) (*image.RGBA, int, int, error) {
-	w, _, _ := procGetSysMetrics.Call(0)
-	h, _, _ := procGetSysMetrics.Call(1)
-	sw, sh := int(w), int(h)
+	// Must run once before any GetSystemMetrics / GetDC call so Windows
+	// reports real pixel dimensions and BitBlt returns real pixels instead
+	// of a DPI-scaled blank frame on HiDPI / 4K displays.
+	ensureDPIAware()
+
+	// Use the full virtual screen (all monitors). On single-monitor setups
+	// this is identical to SM_CXSCREEN/SM_CYSCREEN; on multi-monitor it
+	// captures everything instead of returning a blank secondary.
+	ox, _, _ := procGetSysMetrics.Call(smXVirtual)
+	oy, _, _ := procGetSysMetrics.Call(smYVirtual)
+	w, _, _ := procGetSysMetrics.Call(smCxVirtual)
+	h, _, _ := procGetSysMetrics.Call(smCyVirtual)
+	sw, sh := int(int32(w)), int(int32(h))
+	sox, soy := int(int32(ox)), int(int32(oy))
+	if sw <= 0 || sh <= 0 {
+		// Fallback to the primary monitor.
+		pw, _, _ := procGetSysMetrics.Call(0)
+		ph, _, _ := procGetSysMetrics.Call(1)
+		sw, sh = int(pw), int(ph)
+		sox, soy = 0, 0
+	}
 	if sw <= 0 || sh <= 0 {
 		return nil, 0, 0, fmt.Errorf("no screen")
 	}
@@ -1094,8 +1112,14 @@ func captureFrame(maxW int) (*image.RGBA, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("CreateCompatibleBitmap failed")
 	}
 	defer procDeleteObj.Call(bmp)
-	procSelectObj.Call(memDC, bmp)
-	procBitBlt2.Call(memDC, 0, 0, uintptr(sw), uintptr(sh), screenDC, 0, 0, 0x00CC0020|0x40000000)
+	old, _, _ := procSelectObj.Call(memDC, bmp)
+	// SRCCOPY | CAPTUREBLT so layered / DWM-composited windows are included
+	// instead of showing as a transparent / black rectangle.
+	procBitBlt2.Call(memDC, 0, 0, uintptr(sw), uintptr(sh), screenDC,
+		uintptr(sox), uintptr(soy), 0x00CC0020|0x40000000)
+	if old != 0 {
+		procSelectObj.Call(memDC, old)
+	}
 	var bi bitmapInfo
 	bi.Header.Size = uint32(unsafe.Sizeof(bi.Header))
 	bi.Header.Width = int32(sw)
