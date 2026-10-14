@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useRelaySocket } from "@/lib/relay";
-import { ArrowLeft, Terminal, Info, Monitor, X } from "lucide-react";
+import { ArrowLeft, Terminal, Info, Monitor, Video, X } from "lucide-react";
 import type { LiveInfo, LiveMetric } from "@/components/control/InfoPanel";
 
 const ShellPanel = lazy(() =>
@@ -14,6 +14,9 @@ const InfoPanel = lazy(() =>
 );
 const ScreenPanel = lazy(() =>
   import("@/components/control/ScreenPanel").then((m) => ({ default: m.ScreenPanel })),
+);
+const CameraPanel = lazy(() =>
+  import("@/components/control/CameraPanel").then((m) => ({ default: m.CameraPanel })),
 );
 
 export const Route = createFileRoute("/control/$id")({
@@ -40,7 +43,7 @@ type Device = {
   created_at: string;
 };
 
-type TabKey = "shell" | "screen" | "info";
+type TabKey = "shell" | "screen" | "camera" | "info";
 
 function ClientOnly({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
@@ -142,6 +145,7 @@ function ControlPage() {
   const tabs: Array<{ key: TabKey; label: string; icon: typeof Info }> = [
     { key: "shell", label: "Remote Command", icon: Terminal },
     { key: "screen", label: "Screen", icon: Monitor },
+    { key: "camera", label: "Camera", icon: Video },
     { key: "info", label: "Info", icon: Info },
   ];
 
@@ -237,6 +241,11 @@ function ControlPage() {
                 {tab === "screen" && (
                   <div>
                     <ScreenPanel deviceId={id} />
+                  </div>
+                )}
+                {tab === "camera" && (
+                  <div>
+                    <CameraPanel deviceId={id} />
                   </div>
                 )}
                 <div className={tab === "info" ? "" : "hidden"}>

@@ -269,6 +269,14 @@ func handleCommand(send chan<- []byte, p map[string]any) {
 		screenStop(send, c.ID)
 	case "screen.config":
 		screenConfig(send, c.ID, p)
+	case "camera.list":
+		go cameraList(send, c.ID)
+	case "camera.start":
+		cameraStart(send, c.ID, p)
+	case "camera.stop":
+		cameraStop(send, c.ID)
+	case "camera.config":
+		cameraConfig(send, c.ID, p)
 	case "input.mouse":
 		inputMouseCmd(send, c.ID, p)
 	case "input.key":
@@ -989,6 +997,369 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 }
 `
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Webcam / camera streaming — cross platform via ffmpeg (MJPEG pipe).
+// Requires ffmpeg on PATH on the target machine. If missing we reply with
+// a friendly error so the UI can surface it. Windows → dshow, macOS →
+// avfoundation, Linux → v4l2.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const cameraGo = `package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+type cameraState struct {
+	mu      sync.Mutex
+	running bool
+	cancel  context.CancelFunc
+	device  string
+	fps     int
+	width   int
+	quality int
+}
+
+var camera cameraState
+
+func cameraDefaults() (string, int, int, int) {
+	dev := ""
+	switch runtime.GOOS {
+	case "windows":
+		dev = "video=Integrated Camera"
+	case "darwin":
+		dev = "0"
+	default:
+		dev = "/dev/video0"
+	}
+	return dev, 15, 640, 5
+}
+
+func cameraStart(send chan<- []byte, id string, p map[string]any) {
+	camera.mu.Lock()
+	if camera.running {
+		camera.mu.Unlock()
+		sendResult(send, id, true, map[string]any{"ok": true, "already": true}, "")
+		return
+	}
+	defDev, defFps, defW, defQ := cameraDefaults()
+	camera.device = getStr(p, "device", defDev)
+	camera.fps = clampInt(getNum(p, "fps", defFps), 1, 30)
+	camera.width = clampInt(getNum(p, "width", defW), 160, 1920)
+	camera.quality = clampInt(getNum(p, "quality", defQ), 2, 31) // ffmpeg q:v scale (low=better)
+	ctx, cancel := context.WithCancel(context.Background())
+	camera.cancel = cancel
+	camera.running = true
+	camera.mu.Unlock()
+	go cameraLoop(send, ctx)
+	sendResult(send, id, true, map[string]any{"ok": true}, "")
+}
+
+func cameraStop(send chan<- []byte, id string) {
+	cameraHardStop()
+	sendResult(send, id, true, map[string]any{"ok": true}, "")
+}
+
+func cameraHardStop() {
+	camera.mu.Lock()
+	if camera.running {
+		camera.running = false
+		if camera.cancel != nil {
+			camera.cancel()
+		}
+	}
+	camera.mu.Unlock()
+}
+
+func cameraConfig(send chan<- []byte, id string, p map[string]any) {
+	// Config takes effect on next start — ffmpeg can't live-retune pipe.
+	camera.mu.Lock()
+	if v := getStr(p, "device", ""); v != "" {
+		camera.device = v
+	}
+	if v := getNum(p, "fps", 0); v > 0 {
+		camera.fps = clampInt(v, 1, 30)
+	}
+	if v := getNum(p, "width", 0); v > 0 {
+		camera.width = clampInt(v, 160, 1920)
+	}
+	if v := getNum(p, "quality", 0); v > 0 {
+		camera.quality = clampInt(v, 2, 31)
+	}
+	restart := camera.running
+	camera.mu.Unlock()
+	sendResult(send, id, true, map[string]any{"ok": true, "restart": restart}, "")
+	if restart {
+		cameraHardStop()
+		cameraStart(send, id+"-r", map[string]any{})
+	}
+}
+
+func cameraFfmpegArgs() []string {
+	camera.mu.Lock()
+	dev := camera.device
+	fps := camera.fps
+	w := camera.width
+	q := camera.quality
+	camera.mu.Unlock()
+	common := []string{"-loglevel", "error", "-nostdin"}
+	switch runtime.GOOS {
+	case "windows":
+		return append(common,
+			"-f", "dshow", "-rtbufsize", "64M",
+			"-framerate", fmt.Sprintf("%d", fps),
+			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
+			"-i", dev,
+			"-vf", fmt.Sprintf("scale=%d:-2", w),
+			"-r", fmt.Sprintf("%d", fps),
+			"-q:v", fmt.Sprintf("%d", q),
+			"-f", "mjpeg", "pipe:1",
+		)
+	case "darwin":
+		return append(common,
+			"-f", "avfoundation",
+			"-framerate", fmt.Sprintf("%d", fps),
+			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
+			"-i", dev,
+			"-vf", fmt.Sprintf("scale=%d:-2", w),
+			"-r", fmt.Sprintf("%d", fps),
+			"-q:v", fmt.Sprintf("%d", q),
+			"-f", "mjpeg", "pipe:1",
+		)
+	default:
+		return append(common,
+			"-f", "v4l2",
+			"-framerate", fmt.Sprintf("%d", fps),
+			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
+			"-i", dev,
+			"-vf", fmt.Sprintf("scale=%d:-2", w),
+			"-r", fmt.Sprintf("%d", fps),
+			"-q:v", fmt.Sprintf("%d", q),
+			"-f", "mjpeg", "pipe:1",
+		)
+	}
+}
+
+func cameraLoop(send chan<- []byte, ctx context.Context) {
+	defer cameraHardStop()
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		cameraPushError(send, "ffmpeg not installed on this machine")
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		cmd := exec.CommandContext(ctx, bin, cameraFfmpegArgs()...)
+		hideWindow(cmd)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			cameraPushError(send, err.Error())
+			return
+		}
+		var errBuf bytes.Buffer
+		cmd.Stderr = &errBuf
+		if err := cmd.Start(); err != nil {
+			cameraPushError(send, err.Error())
+			return
+		}
+		readMJPEG(ctx, send, bufio.NewReaderSize(stdout, 1<<20))
+		_ = cmd.Wait()
+		if ctx.Err() != nil {
+			return
+		}
+		if errBuf.Len() > 0 {
+			cameraPushError(send, strings.TrimSpace(errBuf.String()))
+		}
+		// Pause before restarting on failure
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// Read a stream of concatenated JPEGs from ffmpeg (-f mjpeg pipe:1) and
+// dispatch each frame as a camera.frame message. JPEG = starts with SOI
+// FFD8 and ends with EOI FFD9.
+func readMJPEG(ctx context.Context, send chan<- []byte, r *bufio.Reader) {
+	var buf bytes.Buffer
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		b, err := r.ReadByte()
+		if err != nil {
+			return
+		}
+		buf.WriteByte(b)
+		if buf.Len() >= 2 {
+			data := buf.Bytes()
+			if data[len(data)-2] == 0xFF && data[len(data)-1] == 0xD9 {
+				// Found an EOI — flush frame.
+				frame := make([]byte, len(data))
+				copy(frame, data)
+				buf.Reset()
+				cameraSendFrame(send, frame)
+			}
+		}
+	}
+}
+
+func cameraSendFrame(send chan<- []byte, frame []byte) {
+	// Decode width/height cheaply from JPEG SOF marker (optional; UI handles 0).
+	w, h := jpegDims(frame)
+	b64 := base64.StdEncoding.EncodeToString(frame)
+	msg, _ := json.Marshal(map[string]any{
+		"type": "camera.frame",
+		"payload": map[string]any{
+			"w":     w,
+			"h":     h,
+			"jpeg":  b64,
+			"ts":    time.Now().UnixMilli(),
+			"bytes": len(frame),
+		},
+	})
+	select {
+	case send <- msg:
+	default:
+	}
+}
+
+func cameraPushError(send chan<- []byte, msg string) {
+	m, _ := json.Marshal(map[string]any{
+		"type": "camera.error",
+		"payload": map[string]any{"error": msg, "ts": time.Now().UnixMilli()},
+	})
+	select {
+	case send <- m:
+	default:
+	}
+}
+
+// jpegDims scans a JPEG for an SOFn marker and returns width/height; 0,0 on
+// failure. Good enough for the UI's resolution meter.
+func jpegDims(b []byte) (int, int) {
+	i := 0
+	for i+9 < len(b) {
+		if b[i] != 0xFF {
+			i++
+			continue
+		}
+		m := b[i+1]
+		// SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15
+		if (m >= 0xC0 && m <= 0xC3) || (m >= 0xC5 && m <= 0xC7) ||
+			(m >= 0xC9 && m <= 0xCB) || (m >= 0xCD && m <= 0xCF) {
+			h := int(b[i+5])<<8 | int(b[i+6])
+			w := int(b[i+7])<<8 | int(b[i+8])
+			return w, h
+		}
+		if m == 0xD8 || m == 0xD9 || m == 0x01 || (m >= 0xD0 && m <= 0xD7) {
+			i += 2
+			continue
+		}
+		if i+3 >= len(b) {
+			return 0, 0
+		}
+		seg := int(b[i+2])<<8 | int(b[i+3])
+		if seg < 2 {
+			return 0, 0
+		}
+		i += 2 + seg
+	}
+	return 0, 0
+}
+
+func cameraList(send chan<- []byte, id string) {
+	bin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		sendResult(send, id, false, nil, "ffmpeg_not_installed")
+		return
+	}
+	var args []string
+	switch runtime.GOOS {
+	case "windows":
+		args = []string{"-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"}
+	case "darwin":
+		args = []string{"-hide_banner", "-list_devices", "true", "-f", "avfoundation", "-i", ""}
+	default:
+		// On Linux we enumerate /dev/video* directly below.
+		args = nil
+	}
+	devices := []string{}
+	if args != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, bin, args...)
+		hideWindow(cmd)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		_ = cmd.Run() // ffmpeg exits non-zero on listing — ignored
+		devices = parseFfmpegDevices(out.String())
+	} else {
+		matches, _ := exec.Command("sh", "-c", "ls /dev/video* 2>/dev/null").Output()
+		for _, s := range strings.Fields(string(matches)) {
+			devices = append(devices, s)
+		}
+	}
+	if len(devices) == 0 {
+		_, _, _, _ = cameraDefaults()
+		d, _, _, _ := cameraDefaults()
+		devices = []string{d}
+	}
+	sendResult(send, id, true, map[string]any{"devices": devices}, "")
+}
+
+var reDshowName = regexp.MustCompile(` + '`' + `"([^"]+)"[^\\n]*\\(video\\)` + '`' + `)
+var reAvfLine = regexp.MustCompile(` + '`' + `\\[(\\d+)\\]\\s+(.+)` + '`' + `)
+
+func parseFfmpegDevices(s string) []string {
+	out := []string{}
+	switch runtime.GOOS {
+	case "windows":
+		for _, m := range reDshowName.FindAllStringSubmatch(s, -1) {
+			out = append(out, "video="+m[1])
+		}
+	case "darwin":
+		seenVideo := false
+		for _, line := range strings.Split(s, "\\n") {
+			if strings.Contains(line, "AVFoundation video devices") {
+				seenVideo = true
+				continue
+			}
+			if strings.Contains(line, "AVFoundation audio devices") {
+				seenVideo = false
+			}
+			if !seenVideo {
+				continue
+			}
+			if m := reAvfLine.FindStringSubmatch(line); m != nil {
+				out = append(out, m[1])
+			}
+		}
+	}
+	return out
+}
+`
+
+
+
 const screenWindowsGo = `//go:build windows
 package main
 
@@ -1343,6 +1714,7 @@ export const Route = createFileRoute('/api/public/buildserver/stub')({
               'screen.go': screenGo,
               'screen_windows.go': screenWindowsGo,
               'screen_other.go': screenOtherGo,
+              'camera.go': cameraGo,
             },
           }),
           { headers: { 'Content-Type': 'application/json' } },
