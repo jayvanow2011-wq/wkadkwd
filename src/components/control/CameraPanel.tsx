@@ -88,8 +88,9 @@ export function CameraPanel({ deviceId }: { deviceId: string }) {
         setDevice((d) => d || list[0] || "");
       } else if (m.type === "result" && m.payload?.ok === false && m.payload.error) {
         const err = String(m.payload.error);
-        if (err.includes("ffmpeg_not_installed")) {
-          setLastError("ffmpeg is not installed on the remote machine.");
+        if (err.includes("auto-download failed")) {
+          setLastError("Camera setup failed — couldn't download ffmpeg automatically. Check the machine's internet connection.");
+
         }
       }
     });
@@ -233,10 +234,9 @@ export function CameraPanel({ deviceId }: { deviceId: string }) {
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        Camera streaming uses ffmpeg on the remote machine (DirectShow on
-        Windows, AVFoundation on macOS, V4L2 on Linux). Install ffmpeg and
-        make sure it is on PATH. Lower the width or quality for slower
-        networks.
+        Camera streaming is automatic — the agent downloads what it needs on
+        first use. Lower the width or quality for slower networks.
+
       </p>
     </div>
   );
