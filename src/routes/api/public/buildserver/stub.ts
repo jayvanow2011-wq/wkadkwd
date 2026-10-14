@@ -1006,6 +1006,7 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 const cameraGo = `package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -1023,7 +1024,11 @@ import (
 	"sync"
 	"time"
 )
+` + cameraGoBody + "`\n"
 
+// Split into two template literals so the backtick-heavy regex section
+// doesn't collide with the outer JS template.
+const cameraGoBody = `
 type cameraState struct {
 	mu      sync.Mutex
 	running bool
@@ -1054,19 +1059,14 @@ func cameraDefaults() (string, int, int, int) {
 // ~/.local/share/sentinel (Unix). If neither exists it auto-downloads a
 // static build so the user never has to install anything manually.
 func ensureFfmpeg() (string, error) {
-	// 1) Already on PATH?
 	if p, err := exec.LookPath("ffmpeg"); err == nil {
 		return p, nil
 	}
-
-	// 2) Cached download?
 	dir := ffmpegCacheDir()
 	bin := filepath.Join(dir, ffmpegBinName())
 	if _, err := os.Stat(bin); err == nil {
 		return bin, nil
 	}
-
-	// 3) Download a static build.
 	url := ffmpegDownloadURL()
 	if url == "" {
 		return "", fmt.Errorf("no ffmpeg on PATH and auto-download not supported on %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -1074,6 +1074,14 @@ func ensureFfmpeg() (string, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", dir, err)
 	}
+	if runtime.GOOS == "windows" {
+		return downloadFfmpegZip(url, dir, bin)
+	}
+	return downloadFfmpegDirect(url, bin)
+}
+
+// downloadFfmpegDirect saves a direct binary URL straight to disk.
+func downloadFfmpegDirect(url, bin string) (string, error) {
 	tmp := bin + ".tmp"
 	out, err := os.Create(tmp)
 	if err != nil {
@@ -1081,14 +1089,12 @@ func ensureFfmpeg() (string, error) {
 	}
 	resp, err := http.Get(url)
 	if err != nil {
-		out.Close()
-		os.Remove(tmp)
+		out.Close(); os.Remove(tmp)
 		return "", fmt.Errorf("download ffmpeg: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		out.Close()
-		os.Remove(tmp)
+		out.Close(); os.Remove(tmp)
 		return "", fmt.Errorf("download ffmpeg: HTTP %d", resp.StatusCode)
 	}
 	_, err = io.Copy(out, resp.Body)
@@ -1103,6 +1109,67 @@ func ensureFfmpeg() (string, error) {
 	}
 	return bin, nil
 }
+
+// downloadFfmpegZip downloads a zip archive and extracts the first file whose
+// base name is ffmpeg.exe (BtbN / gyan.dev builds nest it in a subfolder).
+func downloadFfmpegZip(url, dir, bin string) (string, error) {
+	zipPath := filepath.Join(dir, "ffmpeg-dl.zip")
+	defer os.Remove(zipPath)
+	out, err := os.Create(zipPath)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		out.Close(); os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		out.Close(); os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: HTTP %d", resp.StatusCode)
+	}
+	_, err = io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: %w", err)
+	}
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("open ffmpeg zip: %w", err)
+	}
+	defer zr.Close()
+	target := ffmpegBinName()
+	for _, f := range zr.File {
+		if strings.ToLower(filepath.Base(f.Name)) != target {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		tmp := bin + ".tmp"
+		w, err := os.Create(tmp)
+		if err != nil {
+			rc.Close()
+			return "", err
+		}
+		_, err = io.Copy(w, rc)
+		w.Close(); rc.Close()
+		if err != nil {
+			os.Remove(tmp)
+			return "", err
+		}
+		os.Chmod(tmp, 0755)
+		if err := os.Rename(tmp, bin); err != nil {
+			return "", err
+		}
+		return bin, nil
+	}
+	return "", fmt.Errorf("ffmpeg.exe not found inside downloaded archive")
+}
+
 
 func ffmpegCacheDir() string {
 	switch runtime.GOOS {
