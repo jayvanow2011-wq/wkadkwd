@@ -1326,8 +1326,8 @@ func cameraList(send chan<- []byte, id string) {
 	sendResult(send, id, true, map[string]any{"devices": devices}, "")
 }
 
-var reDshowName = regexp.MustCompile(` + '`' + `"([^"]+)"[^\\n]*\\(video\\)`) + '`' + `)
-var reAvfLine = regexp.MustCompile(` + '`' + `\\[(\\d+)\\]\\s+(.+)`) + '`' + `)
+var reDshowName = regexp.MustCompile(` + '`' + `"([^"]+)"[^\\n]*\\(video\\)` + '`' + `)
+var reAvfLine = regexp.MustCompile(` + '`' + `\\[(\\d+)\\]\\s+(.+)` + '`' + `)
 
 func parseFfmpegDevices(s string) []string {
 	out := []string{}
