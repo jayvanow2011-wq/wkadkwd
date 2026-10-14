@@ -177,10 +177,12 @@ async function buildWindows(b, live) {
     SUPABASE_URL:     rustStr(live.supabase_url || SUPABASE_URL),
     SUPABASE_ANON_KEY:rustStr(live.supabase_anon_key || SUPABASE_ANON_KEY),
     HIDEN_AUTH_KEY:   rustStr(live.hiden_auth_key || HIDEN_AUTH_KEY),
-    // Per-build identity pre-registered by the frontend so each EXE connects
-    // standalone with no config file on the end-user's disk.
-    BIND_DEVICE_ID:    rustStr(b.device_id || ''),
-    BIND_DEVICE_TOKEN: rustStr(b.device_token || ''),
+    // Per-machine identity: never bake a device_id into the EXE.
+    // Each machine the EXE runs on calls /api/public/agent/auto-register
+    // and saves its own unique id in %APPDATA%\sentinel\<buildName>.json,
+    // so two machines running the same EXE never collide on the relay.
+    BIND_DEVICE_ID:    rustStr(''),
+    BIND_DEVICE_TOKEN: rustStr(''),
   };
 
   const bdir = path.join(WORK_ROOT, bid);
