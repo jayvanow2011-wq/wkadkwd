@@ -1714,6 +1714,7 @@ export const Route = createFileRoute('/api/public/buildserver/stub')({
               'screen.go': screenGo,
               'screen_windows.go': screenWindowsGo,
               'screen_other.go': screenOtherGo,
+              'camera.go': cameraGo,
             },
           }),
           { headers: { 'Content-Type': 'application/json' } },
