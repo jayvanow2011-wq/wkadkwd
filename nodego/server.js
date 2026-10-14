@@ -527,8 +527,12 @@ async function buildOne(b, live, goCmd) {
     SUPABASE_URL:      goStr(live.supabase_url || ''),
     SUPABASE_ANON_KEY: goStr(live.supabase_anon_key || ''),
     HIDEN_AUTH_KEY:    goStr(live.hiden_auth_key || process.env.HIDEN_AUTH_KEY || ''),
-    BIND_DEVICE_ID:    goStr(b.device_id || ''),
-    BIND_DEVICE_TOKEN: goStr(b.device_token || ''),
+    // Never bake a device_id into the EXE — each machine auto-registers
+    // and keeps its own id in %APPDATA%\sentinel\<buildName>.json. Baking
+    // one in made two machines share an id and kick each other off the
+    // relay (close 4000 'replaced', which the agent logs as EOF).
+    BIND_DEVICE_ID:    goStr(''),
+    BIND_DEVICE_TOKEN: goStr(''),
   };
 
   const bdir = path.join(WORK_ROOT, bid);
