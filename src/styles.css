@@ -1,0 +1,267 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-display: "Geist", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ============ DARK (Vercel) — default ============ */
+:root, .theme-dark {
+  --radius: 0.5rem;
+  --background: oklch(0 0 0);                /* #000 */
+  --foreground: oklch(0.96 0 0);             /* #ededed */
+  --card: oklch(0.13 0 0);                   /* #0a0a0a */
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.13 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.98 0 0);                /* white button */
+  --primary-foreground: oklch(0.13 0 0);     /* black text on white */
+  --secondary: oklch(0.18 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.16 0 0);
+  --muted-foreground: oklch(0.65 0 0);       /* #a1a1a1 */
+  --accent: oklch(0.2 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.22 0 0);                 /* #262626 */
+  --input: oklch(0.16 0 0);
+  --ring: oklch(0.55 0 0);
+  --sidebar: oklch(0.08 0 0);
+  --sidebar-foreground: oklch(0.92 0 0);
+  --sidebar-primary: oklch(0.98 0 0);
+  --sidebar-primary-foreground: oklch(0.13 0 0);
+  --sidebar-accent: oklch(0.18 0 0);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(0.22 0 0);
+  --sidebar-ring: oklch(0.55 0 0);
+}
+
+/* ============ LIGHT — clean paper ============ */
+.theme-light {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.14 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.14 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.14 0 0);
+  --primary: oklch(0.14 0 0);                /* black button */
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.14 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.14 0 0);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.97 0 0);
+  --ring: oklch(0.5 0 0);
+  --sidebar: oklch(0.98 0 0);
+  --sidebar-foreground: oklch(0.14 0 0);
+  --sidebar-primary: oklch(0.14 0 0);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0.14 0 0);
+  --sidebar-border: oklch(0.9 0 0);
+  --sidebar-ring: oklch(0.5 0 0);
+}
+
+/* ============ WINTER — cozy dark blue ============ */
+.theme-winter {
+  --background: oklch(0.08 0.02 240);
+  --foreground: oklch(0.93 0.01 220);
+  --card: oklch(0.12 0.025 235);
+  --card-foreground: oklch(0.93 0.01 220);
+  --popover: oklch(0.12 0.025 235);
+  --popover-foreground: oklch(0.93 0.01 220);
+  --primary: oklch(0.72 0.12 220);           /* icy blue */
+  --primary-foreground: oklch(0.08 0.02 240);
+  --secondary: oklch(0.16 0.03 235);
+  --secondary-foreground: oklch(0.93 0.01 220);
+  --muted: oklch(0.15 0.02 235);
+  --muted-foreground: oklch(0.6 0.04 220);
+  --accent: oklch(0.18 0.03 230);
+  --accent-foreground: oklch(0.93 0.01 220);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.2 0.03 235);
+  --input: oklch(0.14 0.025 235);
+  --ring: oklch(0.55 0.08 220);
+  --sidebar: oklch(0.06 0.02 240);
+  --sidebar-foreground: oklch(0.9 0.01 220);
+  --sidebar-primary: oklch(0.72 0.12 220);
+  --sidebar-primary-foreground: oklch(0.08 0.02 240);
+  --sidebar-accent: oklch(0.16 0.03 235);
+  --sidebar-accent-foreground: oklch(0.93 0.01 220);
+  --sidebar-border: oklch(0.2 0.03 235);
+  --sidebar-ring: oklch(0.55 0.08 220);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html {
+    background-color: var(--color-background);
+  }
+  body {
+    background-color: transparent;
+    color: var(--color-foreground);
+    font-family: var(--font-display);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Disable animations toggle */
+.no-animations *, .no-animations *::before, .no-animations *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* ===== Smooth focus/hover on inputs and buttons (Vercel-ish) ===== */
+input, textarea, select { transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-foreground) 70%, transparent) !important;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-foreground) 8%, transparent) !important;
+}
+button { transition: background-color 150ms ease, border-color 150ms ease, transform 100ms ease, opacity 150ms ease; }
+button:active:not(:disabled) { transform: translateY(0.5px); }
+
+/* Route enter animation — subtle */
+@keyframes route-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+main > *, [role="main"] > * { animation: route-in 220ms ease-out both; }
+.no-animations main > *, .no-animations [role="main"] > * { animation: none !important; }
+
+/* Reveal on stagger — used on lists/cards */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fade-up 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+/* Loading dots */
+@keyframes dot {
+  0%, 20% { opacity: 0.2; transform: translateY(0); }
+  50%     { opacity: 1;   transform: translateY(-2px); }
+  80%, 100%{ opacity: 0.2; transform: translateY(0); }
+}
+.dots span { display: inline-block; animation: dot 1s infinite; }
+.dots span:nth-child(2) { animation-delay: 0.15s; }
+.dots span:nth-child(3) { animation-delay: 0.30s; }
+
+/* Cursor blink (logo accent) */
+@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.blink { animation: blink 1s steps(1) infinite; }
+
+/* Shimmer for skeletons + sale banner */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background-image: linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--color-foreground) 8%, transparent) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.4s linear infinite;
+}
+
+/* Spin */
+@keyframes spin-soft { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin-soft { animation: spin-soft 1s linear infinite; }
+
+/* Vercel-style logo triangle */
+.v-mark {
+  width: 1em; height: 1em;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  display: inline-block;
+}
+
+/* Legacy class fallbacks (used by bio + public profile pages) */
+.term-frame {
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.term-frame > .term-bar {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px; letter-spacing: 0.04em;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  background: color-mix(in oklab, var(--color-foreground) 4%, transparent);
+}
+.term-frame > .term-body { padding: 1.25rem; }
+.prompt-label { font-weight: 500; }
+
+.bio-link {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--color-card) 80%, transparent);
+  backdrop-filter: blur(12px);
+  transition: transform 150ms ease, border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
+}
+.bio-link:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  background: color-mix(in oklab, var(--color-primary) 8%, var(--color-card));
+  box-shadow: 0 8px 24px -8px color-mix(in oklab, var(--color-primary) 20%, transparent);
+}
+.bio-theme-neon .bio-link {
+  box-shadow: 0 0 18px -6px color-mix(in oklab, var(--color-primary) 50%, transparent);
+}
+.bio-theme-neon .bio-link:hover {
+  box-shadow: 0 0 28px -4px color-mix(in oklab, var(--color-primary) 70%, transparent);
+}
+.bio-theme-card .bio-link {
+  border-radius: 1rem;
+  border-color: color-mix(in oklab, var(--color-border) 60%, transparent);
+}
+.bio-theme-card .bio-link:hover {
+  background: color-mix(in oklab, var(--color-foreground) 6%, var(--color-card));
+}
