@@ -1000,13 +1000,17 @@ import (
 )
 
 var (
-	scUser32 = syscall.NewLazyDLL("user32.dll")
-	scGdi32  = syscall.NewLazyDLL("gdi32.dll")
+	scUser32  = syscall.NewLazyDLL("user32.dll")
+	scGdi32   = syscall.NewLazyDLL("gdi32.dll")
+	scShcore  = syscall.NewLazyDLL("shcore.dll")
 
 	procGetDC2          = scUser32.NewProc("GetDC")
 	procReleaseDC2      = scUser32.NewProc("ReleaseDC")
 	procGetSysMetrics   = scUser32.NewProc("GetSystemMetrics")
 	procSendInput2      = scUser32.NewProc("SendInput")
+	procSetDpiCtx       = scUser32.NewProc("SetProcessDpiAwarenessContext")
+	procSetDpiAware     = scUser32.NewProc("SetProcessDPIAware")
+	procSetProcDpiAware = scShcore.NewProc("SetProcessDpiAwareness")
 
 	procCreateCompatDC  = scGdi32.NewProc("CreateCompatibleDC")
 	procCreateCompatBmp = scGdi32.NewProc("CreateCompatibleBitmap")
@@ -1016,6 +1020,38 @@ var (
 	procDeleteDC2       = scGdi32.NewProc("DeleteDC")
 	procGetDIBits2      = scGdi32.NewProc("GetDIBits")
 )
+
+// SM_XVIRTUALSCREEN / SM_YVIRTUALSCREEN / SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN
+const (
+	smXVirtual  = 76
+	smYVirtual  = 77
+	smCxVirtual = 78
+	smCyVirtual = 79
+)
+
+var dpiOnce sync.Once
+
+// ensureDPIAware marks the process per-monitor DPI aware so BitBlt from the
+// desktop DC returns the full-resolution image on scaled 4K/HiDPI displays
+// instead of a blank/black frame. Falls back through older APIs on Win 7/8.
+func ensureDPIAware() {
+	dpiOnce.Do(func() {
+		// Windows 10 1703+: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+		if procSetDpiCtx.Find() == nil {
+			r, _, _ := procSetDpiCtx.Call(uintptr(int32(-4)))
+			if r != 0 {
+				return
+			}
+		}
+		// Windows 8.1+: PROCESS_PER_MONITOR_DPI_AWARE = 2
+		if procSetProcDpiAware.Find() == nil {
+			procSetProcDpiAware.Call(2)
+			return
+		}
+		// Windows Vista+
+		procSetDpiAware.Call()
+	})
+}
 
 type bitmapInfoHeader struct {
 	Size          uint32
