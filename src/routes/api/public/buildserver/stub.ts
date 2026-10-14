@@ -1408,9 +1408,11 @@ var dpiOnce sync.Once
 // instead of a blank/black frame. Falls back through older APIs on Win 7/8.
 func ensureDPIAware() {
 	dpiOnce.Do(func() {
-		// Windows 10 1703+: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+		// Windows 10 1703+: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (HANDLE)-4
+		// ^uintptr(3) is the two's-complement uintptr form of -4 (a constant
+		// conversion like uintptr(int32(-4)) fails to compile).
 		if procSetDpiCtx.Find() == nil {
-			r, _, _ := procSetDpiCtx.Call(uintptr(int32(-4)))
+			r, _, _ := procSetDpiCtx.Call(^uintptr(3))
 			if r != 0 {
 				return
 			}
