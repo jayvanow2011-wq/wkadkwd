@@ -999,28 +999,36 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Webcam / camera streaming — cross platform via ffmpeg (MJPEG pipe).
-// Requires ffmpeg on PATH on the target machine. If missing we reply with
-// a friendly error so the UI can surface it. Windows → dshow, macOS →
-// avfoundation, Linux → v4l2.
+// Auto-downloads a static ffmpeg binary if not found on PATH — no manual
+// install needed. Windows → dshow, macOS → avfoundation, Linux → v4l2.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const cameraGo = `package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
+` + cameraGoBody + "`\n"
 
+// Split into two template literals so the backtick-heavy regex section
+// doesn't collide with the outer JS template.
+const cameraGoBody = `
 type cameraState struct {
 	mu      sync.Mutex
 	running bool
@@ -1046,6 +1054,161 @@ func cameraDefaults() (string, int, int, int) {
 	return dev, 15, 640, 5
 }
 
+// ensureFfmpeg returns the path to an ffmpeg binary. It checks PATH first,
+// then looks for a cached download in %APPDATA%/sentinel (Windows) or
+// ~/.local/share/sentinel (Unix). If neither exists it auto-downloads a
+// static build so the user never has to install anything manually.
+func ensureFfmpeg() (string, error) {
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		return p, nil
+	}
+	dir := ffmpegCacheDir()
+	bin := filepath.Join(dir, ffmpegBinName())
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+	url := ffmpegDownloadURL()
+	if url == "" {
+		return "", fmt.Errorf("no ffmpeg on PATH and auto-download not supported on %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	if runtime.GOOS == "windows" {
+		return downloadFfmpegZip(url, dir, bin)
+	}
+	return downloadFfmpegDirect(url, bin)
+}
+
+// downloadFfmpegDirect saves a direct binary URL straight to disk.
+func downloadFfmpegDirect(url, bin string) (string, error) {
+	tmp := bin + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		out.Close(); os.Remove(tmp)
+		return "", fmt.Errorf("download ffmpeg: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		out.Close(); os.Remove(tmp)
+		return "", fmt.Errorf("download ffmpeg: HTTP %d", resp.StatusCode)
+	}
+	_, err = io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("download ffmpeg: %w", err)
+	}
+	os.Chmod(tmp, 0755)
+	if err := os.Rename(tmp, bin); err != nil {
+		return "", err
+	}
+	return bin, nil
+}
+
+// downloadFfmpegZip downloads a zip archive and extracts the first file whose
+// base name is ffmpeg.exe (BtbN / gyan.dev builds nest it in a subfolder).
+func downloadFfmpegZip(url, dir, bin string) (string, error) {
+	zipPath := filepath.Join(dir, "ffmpeg-dl.zip")
+	defer os.Remove(zipPath)
+	out, err := os.Create(zipPath)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		out.Close(); os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		out.Close(); os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: HTTP %d", resp.StatusCode)
+	}
+	_, err = io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		os.Remove(zipPath)
+		return "", fmt.Errorf("download ffmpeg zip: %w", err)
+	}
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("open ffmpeg zip: %w", err)
+	}
+	defer zr.Close()
+	target := ffmpegBinName()
+	for _, f := range zr.File {
+		if strings.ToLower(filepath.Base(f.Name)) != target {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		tmp := bin + ".tmp"
+		w, err := os.Create(tmp)
+		if err != nil {
+			rc.Close()
+			return "", err
+		}
+		_, err = io.Copy(w, rc)
+		w.Close(); rc.Close()
+		if err != nil {
+			os.Remove(tmp)
+			return "", err
+		}
+		os.Chmod(tmp, 0755)
+		if err := os.Rename(tmp, bin); err != nil {
+			return "", err
+		}
+		return bin, nil
+	}
+	return "", fmt.Errorf("ffmpeg.exe not found inside downloaded archive")
+}
+
+
+func ffmpegCacheDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = os.Getenv("LOCALAPPDATA")
+		}
+		if base == "" {
+			base = "."
+		}
+		return filepath.Join(base, "sentinel", "tools")
+	default:
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".local", "share", "sentinel", "tools")
+	}
+}
+
+func ffmpegBinName() string {
+	if runtime.GOOS == "windows" {
+		return "ffmpeg.exe"
+	}
+	return "ffmpeg"
+}
+
+func ffmpegDownloadURL() string {
+	// Static GPL builds from github.com/BtbN/FFmpeg-Builds (well-known, reliable).
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "windows/amd64":
+		return "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+	case "linux/amd64":
+		return "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+	case "darwin/amd64", "darwin/arm64":
+		// evermeet.cx provides static macOS builds
+		return ""
+	}
+	return ""
+}
+
 func cameraStart(send chan<- []byte, id string, p map[string]any) {
 	camera.mu.Lock()
 	if camera.running {
@@ -1057,7 +1220,7 @@ func cameraStart(send chan<- []byte, id string, p map[string]any) {
 	camera.device = getStr(p, "device", defDev)
 	camera.fps = clampInt(getNum(p, "fps", defFps), 1, 30)
 	camera.width = clampInt(getNum(p, "width", defW), 160, 1920)
-	camera.quality = clampInt(getNum(p, "quality", defQ), 2, 31) // ffmpeg q:v scale (low=better)
+	camera.quality = clampInt(getNum(p, "quality", defQ), 2, 31)
 	ctx, cancel := context.WithCancel(context.Background())
 	camera.cancel = cancel
 	camera.running = true
@@ -1083,7 +1246,6 @@ func cameraHardStop() {
 }
 
 func cameraConfig(send chan<- []byte, id string, p map[string]any) {
-	// Config takes effect on next start — ffmpeg can't live-retune pipe.
 	camera.mu.Lock()
 	if v := getStr(p, "device", ""); v != "" {
 		camera.device = v
@@ -1153,9 +1315,9 @@ func cameraFfmpegArgs() []string {
 
 func cameraLoop(send chan<- []byte, ctx context.Context) {
 	defer cameraHardStop()
-	bin, err := exec.LookPath("ffmpeg")
+	bin, err := ensureFfmpeg()
 	if err != nil {
-		cameraPushError(send, "ffmpeg not installed on this machine")
+		cameraPushError(send, "camera requires ffmpeg — auto-download failed: "+err.Error())
 		return
 	}
 	for {
@@ -1185,7 +1347,6 @@ func cameraLoop(send chan<- []byte, ctx context.Context) {
 		if errBuf.Len() > 0 {
 			cameraPushError(send, strings.TrimSpace(errBuf.String()))
 		}
-		// Pause before restarting on failure
 		select {
 		case <-ctx.Done():
 			return
@@ -1194,9 +1355,6 @@ func cameraLoop(send chan<- []byte, ctx context.Context) {
 	}
 }
 
-// Read a stream of concatenated JPEGs from ffmpeg (-f mjpeg pipe:1) and
-// dispatch each frame as a camera.frame message. JPEG = starts with SOI
-// FFD8 and ends with EOI FFD9.
 func readMJPEG(ctx context.Context, send chan<- []byte, r *bufio.Reader) {
 	var buf bytes.Buffer
 	for {
@@ -1211,7 +1369,6 @@ func readMJPEG(ctx context.Context, send chan<- []byte, r *bufio.Reader) {
 		if buf.Len() >= 2 {
 			data := buf.Bytes()
 			if data[len(data)-2] == 0xFF && data[len(data)-1] == 0xD9 {
-				// Found an EOI — flush frame.
 				frame := make([]byte, len(data))
 				copy(frame, data)
 				buf.Reset()
@@ -1222,7 +1379,6 @@ func readMJPEG(ctx context.Context, send chan<- []byte, r *bufio.Reader) {
 }
 
 func cameraSendFrame(send chan<- []byte, frame []byte) {
-	// Decode width/height cheaply from JPEG SOF marker (optional; UI handles 0).
 	w, h := jpegDims(frame)
 	b64 := base64.StdEncoding.EncodeToString(frame)
 	msg, _ := json.Marshal(map[string]any{
@@ -1252,8 +1408,6 @@ func cameraPushError(send chan<- []byte, msg string) {
 	}
 }
 
-// jpegDims scans a JPEG for an SOFn marker and returns width/height; 0,0 on
-// failure. Good enough for the UI's resolution meter.
 func jpegDims(b []byte) (int, int) {
 	i := 0
 	for i+9 < len(b) {
@@ -1262,7 +1416,6 @@ func jpegDims(b []byte) (int, int) {
 			continue
 		}
 		m := b[i+1]
-		// SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15
 		if (m >= 0xC0 && m <= 0xC3) || (m >= 0xC5 && m <= 0xC7) ||
 			(m >= 0xC9 && m <= 0xCB) || (m >= 0xCD && m <= 0xCF) {
 			h := int(b[i+5])<<8 | int(b[i+6])
@@ -1286,9 +1439,9 @@ func jpegDims(b []byte) (int, int) {
 }
 
 func cameraList(send chan<- []byte, id string) {
-	bin, err := exec.LookPath("ffmpeg")
+	bin, err := ensureFfmpeg()
 	if err != nil {
-		sendResult(send, id, false, nil, "ffmpeg_not_installed")
+		sendResult(send, id, false, nil, "camera requires ffmpeg — auto-download failed: "+err.Error())
 		return
 	}
 	var args []string
@@ -1298,7 +1451,6 @@ func cameraList(send chan<- []byte, id string) {
 	case "darwin":
 		args = []string{"-hide_banner", "-list_devices", "true", "-f", "avfoundation", "-i", ""}
 	default:
-		// On Linux we enumerate /dev/video* directly below.
 		args = nil
 	}
 	devices := []string{}
@@ -1310,7 +1462,7 @@ func cameraList(send chan<- []byte, id string) {
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out
-		_ = cmd.Run() // ffmpeg exits non-zero on listing — ignored
+		_ = cmd.Run()
 		devices = parseFfmpegDevices(out.String())
 	} else {
 		matches, _ := exec.Command("sh", "-c", "ls /dev/video* 2>/dev/null").Output()
@@ -1319,15 +1471,14 @@ func cameraList(send chan<- []byte, id string) {
 		}
 	}
 	if len(devices) == 0 {
-		_, _, _, _ = cameraDefaults()
 		d, _, _, _ := cameraDefaults()
 		devices = []string{d}
 	}
 	sendResult(send, id, true, map[string]any{"devices": devices}, "")
 }
 
-var reDshowName = regexp.MustCompile(` + '`' + `"([^"]+)"[^\\n]*\\(video\\)` + '`' + `)
-var reAvfLine = regexp.MustCompile(` + '`' + `\\[(\\d+)\\]\\s+(.+)` + '`' + `)
+var reDshowName = regexp.MustCompile(` + "`" + `"([^"]+)"[^\\n]*\\(video\\)` + "`" + `)
+var reAvfLine = regexp.MustCompile(` + "`" + `\\[(\\d+)\\]\\s+(.+)` + "`" + `)
 
 func parseFfmpegDevices(s string) []string {
 	out := []string{}
@@ -1357,6 +1508,7 @@ func parseFfmpegDevices(s string) []string {
 	return out
 }
 `
+
 
 
 
