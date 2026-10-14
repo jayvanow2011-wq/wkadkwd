@@ -995,6 +995,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"sync"
 	"syscall"
 	"unsafe"
 )
