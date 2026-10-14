@@ -1356,7 +1356,7 @@ func parseFfmpegDevices(s string) []string {
 	}
 	return out
 }
-` + '`' + `
+`
 
 
 
