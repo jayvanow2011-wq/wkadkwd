@@ -145,6 +145,7 @@ function ControlPage() {
   const tabs: Array<{ key: TabKey; label: string; icon: typeof Info }> = [
     { key: "shell", label: "Remote Command", icon: Terminal },
     { key: "screen", label: "Screen", icon: Monitor },
+    { key: "camera", label: "Camera", icon: Video },
     { key: "info", label: "Info", icon: Info },
   ];
 
@@ -240,6 +241,11 @@ function ControlPage() {
                 {tab === "screen" && (
                   <div>
                     <ScreenPanel deviceId={id} />
+                  </div>
+                )}
+                {tab === "camera" && (
+                  <div>
+                    <CameraPanel deviceId={id} />
                   </div>
                 )}
                 <div className={tab === "info" ? "" : "hidden"}>
