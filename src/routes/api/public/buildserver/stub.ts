@@ -1296,26 +1296,40 @@ func cameraLoop(send chan<- []byte, ctx context.Context) {
 			return
 		default:
 		}
-		cmd := exec.CommandContext(ctx, bin, cameraFfmpegArgs()...)
+		args := cameraFfmpegArgs()
+		cmd := exec.CommandContext(ctx, bin, args...)
 		hideWindow(cmd)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			cameraPushError(send, err.Error())
 			return
 		}
-		var errBuf bytes.Buffer
-		cmd.Stderr = &errBuf
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			cameraPushError(send, err.Error())
+			return
+		}
 		if err := cmd.Start(); err != nil {
 			cameraPushError(send, err.Error())
 			return
 		}
+		// Stream stderr live so UI shows the real reason instead of hanging on
+		// "Waiting for first frame…" when the device/size is wrong.
+		go func() {
+			sc := bufio.NewScanner(stderr)
+			sc.Buffer(make([]byte, 1<<16), 1<<20)
+			for sc.Scan() {
+				line := strings.TrimSpace(sc.Text())
+				if line == "" {
+					continue
+				}
+				cameraPushError(send, line)
+			}
+		}()
 		readMJPEG(ctx, send, bufio.NewReaderSize(stdout, 1<<20))
 		_ = cmd.Wait()
 		if ctx.Err() != nil {
 			return
-		}
-		if errBuf.Len() > 0 {
-			cameraPushError(send, strings.TrimSpace(errBuf.String()))
 		}
 		select {
 		case <-ctx.Done():
