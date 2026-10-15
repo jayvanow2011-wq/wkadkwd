@@ -1507,7 +1507,7 @@ import (
 	"sync"
 	"time"
 )
-` + cameraGoBody + "`\n"
+` + cameraGoBody
 
 
 
