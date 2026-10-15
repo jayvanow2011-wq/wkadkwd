@@ -1486,6 +1486,31 @@ func parseFfmpegDevices(s string) []string {
 }
 `
 
+const cameraGo = `package main
+
+import (
+	"archive/zip"
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+` + cameraGoBody + "`\n"
+
+
+
 
 
 
