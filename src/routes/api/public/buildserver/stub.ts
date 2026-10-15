@@ -1003,29 +1003,6 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 // install needed. Windows → dshow, macOS → avfoundation, Linux → v4l2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const cameraGo = `package main
-
-import (
-	"archive/zip"
-	"bufio"
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strings"
-	"sync"
-	"time"
-)
-` + cameraGoBody + "`\n"
-
 // Split into two template literals so the backtick-heavy regex section
 // doesn't collide with the outer JS template.
 const cameraGoBody = `
@@ -1275,41 +1252,34 @@ func cameraFfmpegArgs() []string {
 	w := camera.width
 	q := camera.quality
 	camera.mu.Unlock()
-	common := []string{"-loglevel", "error", "-nostdin"}
+	// Keep input constraints OFF — most webcams only expose a handful of
+	// (size, framerate, pixel_format) tuples and any mismatch makes ffmpeg
+	// bail with no frames. Let it auto-negotiate the input and apply fps /
+	// scale on the output side.
+	common := []string{"-loglevel", "warning", "-nostdin", "-fflags", "nobuffer"}
+	output := []string{
+		"-vf", fmt.Sprintf("scale=%d:trunc(ow/a/2)*2", w),
+		"-r", fmt.Sprintf("%d", fps),
+		"-q:v", fmt.Sprintf("%d", q),
+		"-f", "mjpeg", "pipe:1",
+	}
 	switch runtime.GOOS {
 	case "windows":
-		return append(common,
-			"-f", "dshow", "-rtbufsize", "64M",
-			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
+		return append(append(common,
+			"-f", "dshow", "-rtbufsize", "128M",
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	case "darwin":
-		return append(common,
+		return append(append(common,
 			"-f", "avfoundation",
 			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	default:
-		return append(common,
+		return append(append(common,
 			"-f", "v4l2",
-			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	}
 }
 
@@ -1326,26 +1296,40 @@ func cameraLoop(send chan<- []byte, ctx context.Context) {
 			return
 		default:
 		}
-		cmd := exec.CommandContext(ctx, bin, cameraFfmpegArgs()...)
+		args := cameraFfmpegArgs()
+		cmd := exec.CommandContext(ctx, bin, args...)
 		hideWindow(cmd)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			cameraPushError(send, err.Error())
 			return
 		}
-		var errBuf bytes.Buffer
-		cmd.Stderr = &errBuf
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			cameraPushError(send, err.Error())
+			return
+		}
 		if err := cmd.Start(); err != nil {
 			cameraPushError(send, err.Error())
 			return
 		}
+		// Stream stderr live so UI shows the real reason instead of hanging on
+		// "Waiting for first frame…" when the device/size is wrong.
+		go func() {
+			sc := bufio.NewScanner(stderr)
+			sc.Buffer(make([]byte, 1<<16), 1<<20)
+			for sc.Scan() {
+				line := strings.TrimSpace(sc.Text())
+				if line == "" {
+					continue
+				}
+				cameraPushError(send, line)
+			}
+		}()
 		readMJPEG(ctx, send, bufio.NewReaderSize(stdout, 1<<20))
 		_ = cmd.Wait()
 		if ctx.Err() != nil {
 			return
-		}
-		if errBuf.Len() > 0 {
-			cameraPushError(send, strings.TrimSpace(errBuf.String()))
 		}
 		select {
 		case <-ctx.Done():
@@ -1508,6 +1492,31 @@ func parseFfmpegDevices(s string) []string {
 	return out
 }
 `
+
+const cameraGo = `package main
+
+import (
+	"archive/zip"
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+` + cameraGoBody
+
+
 
 
 
