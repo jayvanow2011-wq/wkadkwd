@@ -1003,29 +1003,6 @@ func screenLoop(send chan<- []byte, cancel chan struct{}) {
 // install needed. Windows → dshow, macOS → avfoundation, Linux → v4l2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const cameraGo = `package main
-
-import (
-	"archive/zip"
-	"bufio"
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strings"
-	"sync"
-	"time"
-)
-` + cameraGoBody + "`\n"
-
 // Split into two template literals so the backtick-heavy regex section
 // doesn't collide with the outer JS template.
 const cameraGoBody = `
