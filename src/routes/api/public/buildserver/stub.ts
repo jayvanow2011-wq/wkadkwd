@@ -1252,41 +1252,34 @@ func cameraFfmpegArgs() []string {
 	w := camera.width
 	q := camera.quality
 	camera.mu.Unlock()
-	common := []string{"-loglevel", "error", "-nostdin"}
+	// Keep input constraints OFF — most webcams only expose a handful of
+	// (size, framerate, pixel_format) tuples and any mismatch makes ffmpeg
+	// bail with no frames. Let it auto-negotiate the input and apply fps /
+	// scale on the output side.
+	common := []string{"-loglevel", "warning", "-nostdin", "-fflags", "nobuffer"}
+	output := []string{
+		"-vf", fmt.Sprintf("scale=%d:trunc(ow/a/2)*2", w),
+		"-r", fmt.Sprintf("%d", fps),
+		"-q:v", fmt.Sprintf("%d", q),
+		"-f", "mjpeg", "pipe:1",
+	}
 	switch runtime.GOOS {
 	case "windows":
-		return append(common,
-			"-f", "dshow", "-rtbufsize", "64M",
-			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
+		return append(append(common,
+			"-f", "dshow", "-rtbufsize", "128M",
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	case "darwin":
-		return append(common,
+		return append(append(common,
 			"-f", "avfoundation",
 			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	default:
-		return append(common,
+		return append(append(common,
 			"-f", "v4l2",
-			"-framerate", fmt.Sprintf("%d", fps),
-			"-video_size", fmt.Sprintf("%dx%d", w, (w*3)/4),
 			"-i", dev,
-			"-vf", fmt.Sprintf("scale=%d:-2", w),
-			"-r", fmt.Sprintf("%d", fps),
-			"-q:v", fmt.Sprintf("%d", q),
-			"-f", "mjpeg", "pipe:1",
-		)
+		), output...)
 	}
 }
 
